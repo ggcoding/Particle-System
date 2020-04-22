@@ -1,0 +1,268 @@
+/**
+ * 
+ * PixelFlow | Copyright (C) 2016 Thomas Diewald - http://thomasdiewald.com
+ * 
+ * A Processing/Java library for high performance GPU-Computing (GLSL).
+ * MIT License: https://opensource.org/licenses/MIT
+ * 
+ */
+
+
+
+import com.thomasdiewald.pixelflow.java.DwPixelFlow;
+import com.thomasdiewald.pixelflow.java.softbodydynamics.DwPhysics;
+import com.thomasdiewald.pixelflow.java.softbodydynamics.particle.DwParticle2D;
+import de.voidplus.leapmotion.*;
+import processing.sound.*;
+import java.awt.Rectangle;
+import java.io.FilenameFilter;
+import controlP5.Accordion;
+import controlP5.ControlP5;
+import controlP5.Group;
+import processing.core.*;
+
+
+
+  //
+  // 2D Verlet Particle System.
+  // 
+  // + Collision Detection
+  //
+  //
+  
+int viewport_w = 1280;
+int viewport_h = 720;
+
+
+int gui_w = 200;
+int gui_x = 20;
+int gui_y = 20;
+
+// particle system, cpu
+ParticleSystem particlesystem;
+
+// physics parameters
+DwPhysics.Param param_physics = new DwPhysics.Param();
+
+// verlet physics, handles the update-step
+DwPhysics<DwParticle2D> physics;
+
+// some state variables for the GUI/display
+int     BACKGROUND_COLOR    = #335B81;
+boolean COLLISION_DETECTION = true;
+float INTERACTION_SPACE_WIDTH = 200; // left-right from user
+float INTERACTION_SPACE_DEPTH = 150; // away-and-toward user
+float FINGER_DOT = 30;
+ArrayList<SoundFile> soundfiles = new ArrayList<SoundFile>();
+String[] soundNames;
+
+// ref for LeapMotion
+LeapMotion leap;
+
+public void settings() {
+  size(viewport_w, viewport_h, P2D);
+  smooth(4);
+}
+  
+  public void setup() {
+    leap = new LeapMotion(this);
+    String path = sketchPath("data/audio");
+    soundNames = listFileNames(path);
+    printArray(soundNames);
+    
+    for (int i = 0; i < soundNames.length; i ++){
+     soundfiles.add(new SoundFile(this, "audio/"+soundNames[i])); 
+  }
+  
+    // main library context
+    DwPixelFlow context = new DwPixelFlow(this);
+    context.print();
+//    context.printGL();
+    
+    // particle system object
+    particlesystem = new ParticleSystem(this, width, height);
+    
+    // set some parameters
+    particlesystem.PARTICLE_COUNT              = 1000;
+    particlesystem.PARTICLE_SCREEN_FILL_FACTOR = 0.60f;
+
+    particlesystem.MULT_GRAVITY                = 2.00f;
+
+    particlesystem.particle_param.DAMP_BOUNDS    = 0.99999f;
+    particlesystem.particle_param.DAMP_COLLISION = 0.99999f;
+    particlesystem.particle_param.DAMP_VELOCITY  = 0.99999f;
+    
+    particlesystem.initParticles();
+    
+    physics = new DwPhysics<DwParticle2D>(param_physics);
+    param_physics.GRAVITY = new float[]{0, 0.1f};
+    param_physics.bounds  = new float[]{0, 0, width, height};
+    param_physics.iterations_collisions = 8;
+    param_physics.iterations_springs    = 0; // no springs in this demo
+   
+    createGUI();
+
+    background(0);
+    frameRate(600);
+  }
+  
+ 
+public void draw() {    
+
+      //  //loop for listening for hands
+ 
+  
+  ////  add force: Middle Mouse Button (MMB) -> particle[0]
+    //if(mousePressed){
+    //  float[] mouse = {mouseX, mouseY};
+    //  particlesystem.particles[0].moveTo(mouse, 0.3f);
+    //  particlesystem.particles[0].enableCollisions(false);
+    //} else {
+    //  particlesystem.particles[0].enableCollisions(true);
+    //}
+    
+    // update physics step
+    boolean collision_detection = COLLISION_DETECTION && particlesystem.particle_param.DAMP_COLLISION != 0.0;
+    
+    physics.param.GRAVITY[1] = 0.05f * particlesystem.MULT_GRAVITY;
+    physics.param.iterations_collisions = collision_detection ? 4 : 0;
+
+    physics.setParticles(particlesystem.particles, particlesystem.particles.length);
+    physics.update(1);
+
+    // RENDER
+    background(BACKGROUND_COLOR);
+
+    // draw particlesystem
+    PGraphics pg = this.g;
+    pg.hint(DISABLE_DEPTH_MASK);
+    pg.blendMode(BLEND);
+//    pg.blendMode(ADD);
+    particlesystem.display(pg);
+    pg.blendMode(BLEND);
+    
+  for (Hand hand : leap.getHands ()) {
+    boolean handIsLeft         = hand.isLeft();
+    boolean handIsRight        = hand.isRight();
+    //PVector thumbTip = hand.getThumb().getRawPositionOfJointTip();
+    //PVector indexTip = hand.getIndexFinger().getRawPositionOfJointTip();
+    //PVector ringTip = hand.getRingFinger().getRawPositionOfJointTip();
+    //PVector middleTip = hand.getMiddleFinger().getRawPositionOfJointTip();
+    //PVector pinkyTip = hand.getPinkyFinger().getRawPositionOfJointTip();
+
+    //handleFinger(thumbTip, "thb");
+    //handleFinger(indexTip, "idx");
+    //handleFinger(middleTip, "mdl");
+    //handleFinger(ringTip, "rng");
+    //handleFinger(pinkyTip, "pky");
+    
+    if (handIsLeft){
+      PVector thumbTip = hand.getThumb().getRawPositionOfJointTip();
+      handleFinger(thumbTip, "left_middle");
+      PVector indexTip = hand.getIndexFinger().getRawPositionOfJointTip();
+      handleFinger(indexTip, "left_index");
+
+    }
+    if (handIsRight){
+      PVector thumbTip = hand.getThumb().getRawPositionOfJointTip();
+      handleFinger(thumbTip, "right_middle");
+      PVector indexTip = hand.getIndexFinger().getRawPositionOfJointTip();
+      handleFinger(indexTip, "right_index");
+    }
+
+  }
+    // info
+    String txt_fps = String.format(getClass().getName()+ "   [size %d/%d]   [frame %d]   [fps %6.2f]", width, height, frameCount, frameRate);
+    surface.setTitle(txt_fps);
+}
+  
+
+
+  public void activateCollisionDetection(float[] val){
+    COLLISION_DETECTION = (val[0] > 0);
+  }
+  
+void handleFinger(PVector pos, String hand) { // function to use leapMotion finger tips 
+  // map finger tip position to 2D surface (no height)
+  if (hand == "left_middle"){
+    float x = map(pos.x, -INTERACTION_SPACE_WIDTH, INTERACTION_SPACE_WIDTH, 0, width);
+    float y = map(pos.z, -INTERACTION_SPACE_DEPTH, INTERACTION_SPACE_DEPTH, 0, height);
+    fill(#1000FF);
+    noStroke();
+    ellipse(x, y, FINGER_DOT, FINGER_DOT);
+    float[] mouse = {x, y};
+    particlesystem.particles[0].moveTo(mouse, 0.3f);
+    particlesystem.particles[0].enableCollisions(false);
+  //physics.update(1);particlesystem.particles[0].enableCollisions(true);
+
+    fill(0);
+    text("left_middle", x, y);
+  }
+  if (hand == "left_index"){
+    float x = map(pos.x, -INTERACTION_SPACE_WIDTH, INTERACTION_SPACE_WIDTH, 0, width);
+    float y = map(pos.z, -INTERACTION_SPACE_DEPTH, INTERACTION_SPACE_DEPTH, 0, height);
+    fill(#00E310);
+    noStroke();
+    ellipse(x, y, FINGER_DOT, FINGER_DOT);
+    float[] mouse = {x, y};
+    particlesystem.particles[1].moveTo(mouse, 0.3f);
+    particlesystem.particles[1].enableCollisions(false);
+  //physics.update(1);particlesystem.particles[0].enableCollisions(true);
+
+    fill(0);
+    text("left_index", x, y);
+  }
+  if (hand == "right_middle"){
+    float x = map(pos.x, -INTERACTION_SPACE_WIDTH, INTERACTION_SPACE_WIDTH, 0, width);
+    float y = map(pos.z, -INTERACTION_SPACE_DEPTH, INTERACTION_SPACE_DEPTH, 0, height);
+    fill(#FFD900);
+    noStroke();
+    ellipse(x, y, FINGER_DOT, FINGER_DOT);
+    float[] mouse = {x, y};
+    particlesystem.particles[2].moveTo(mouse, 0.3f);
+    particlesystem.particles[2].enableCollisions(false);
+  //physics.update(1);particlesystem.particles[0].enableCollisions(true);
+
+    fill(0);
+    text("right_middle", x, y);
+  }
+ if (hand == "right_index"){
+    float x = map(pos.x, -INTERACTION_SPACE_WIDTH, INTERACTION_SPACE_WIDTH, 0, width);
+    float y = map(pos.z, -INTERACTION_SPACE_DEPTH, INTERACTION_SPACE_DEPTH, 0, height);
+    fill(#E81717);
+    noStroke();
+    ellipse(x, y, FINGER_DOT, FINGER_DOT);
+    float[] mouse = {x, y};
+    particlesystem.particles[2].moveTo(mouse, 0.3f);
+    particlesystem.particles[2].enableCollisions(false);
+  //physics.update(1);particlesystem.particles[0].enableCollisions(true);
+
+    fill(0);
+    text("right_index", x, y);
+  }
+  
+  if(id == "left_middle"){
+    if(!soundfiles.get(2).isPlaying()){
+       soundfiles.get(2).play(); 
+        println("trigger the soundfile :"+soundNames[1]); 
+     }
+  
+  if(id == "left_index"){
+    if(!soundfiles.get(1).isPlaying()){
+       soundfiles.get(1).play(); 
+        println("trigger the soundfile :"+soundNames[2]); 
+     }
+   
+   if(id == "right_middle"){
+    if(!soundfiles.get(7).isPlaying()){
+       soundfiles.get(7).play(); 
+        println("trigger the soundfile :"+soundNames[3]); 
+     }
+  
+  if(id == "right_index"){
+    if(!soundfiles.get(6).isPlaying()){
+       soundfiles.get(6).play(); 
+        println("trigger the soundfile :"+soundNames[4]); 
+     } 
+ 
+}
